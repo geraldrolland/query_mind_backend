@@ -38,6 +38,11 @@ def on_startup() -> None:
     init_db()
 
 
+@app.get("/")
+def root():
+    return {"status": "ok", "service": settings.APP_NAME, "docs": "/docs"}
+
+
 @app.get("/health")
 def health():
     from app.redis_conf import ping
