@@ -18,13 +18,8 @@ if settings.ENVIRONMENT == "production":
         token=settings.REDIS_TOKEN,
     )
 
-    refresh_redis = Redis(
-        url=settings.PROD_REDIS_URL.replace(
-            f"/{settings.PROD_REDIS_URL.rsplit('/', 1)[-1]}",
-            f"/{settings.REDIS_REFRESH_DB}",
-        ),
-        token=settings.REDIS_TOKEN,
-    )
+    refresh_redis = redis_client
+    
 else:
     redis_client = redis.Redis.from_url(
         settings.REDIS_URL, decode_responses=True, socket_timeout=5
