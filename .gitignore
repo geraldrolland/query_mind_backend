@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+venv.bak/
+dist/
+build/
+
+# Environment files (secrets live in .env — never commit)
+.env
+.env.*
+!.env.example
+
+# Test / tooling artifacts
+.pytest_cache/
+.benchmarks/
+
+# Logs
+*.log
+uvicorn.log
+uvicorn.err.log
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# OpenAPI dumps / scratch
+tmp/
+scratch/
