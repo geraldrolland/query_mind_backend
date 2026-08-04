@@ -16,8 +16,6 @@ if settings.ENVIRONMENT == "production":
     redis_client = Redis(
         url=settings.PROD_REDIS_URL,
         token=settings.REDIS_TOKEN,
-        decode_responses=True,
-        socket_timeout=5,
     )
 
     refresh_redis = Redis(
@@ -26,8 +24,6 @@ if settings.ENVIRONMENT == "production":
             f"/{settings.REDIS_REFRESH_DB}",
         ),
         token=settings.REDIS_TOKEN,
-        decode_responses=True,
-        socket_timeout=5,
     )
 else:
     redis_client = redis.Redis.from_url(
