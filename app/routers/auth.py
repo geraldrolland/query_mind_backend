@@ -52,7 +52,7 @@ def _set_session_cookies(response: Response, user: User, user_agent: str) -> Non
     response.set_cookie(
         key="auth_token",
         value=signed,
-        httponly=True,
+        httponly=settings.COOKIE_HTTPONLY,
         secure=settings.COOKIE_SECURE,
         samesite=settings.COOKIE_SAMESITE,
         max_age=settings.JWT_REFRESH_EXPIRE_DAYS * 86400,
@@ -60,7 +60,7 @@ def _set_session_cookies(response: Response, user: User, user_agent: str) -> Non
     response.set_cookie(
         key="csrf_token",
         value=csrf,
-        httponly=False,
+        httponly=settings.COOKIE_HTTPONLY,
         secure=settings.COOKIE_SECURE,
         samesite=settings.COOKIE_SAMESITE,
     )
