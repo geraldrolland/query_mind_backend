@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
-def _set_session_cookies(response: Response, user: User, user_agent: str) -> None:
+def _set_session_cookies(response: Response, user: User, user_agent: str) -> Response:
     tokens = make_tokens(user.id, user.email, user_agent)
     # Store refresh token jti in Redis for rotation/revocation.
     refresh_redis.set(
@@ -64,6 +64,8 @@ def _set_session_cookies(response: Response, user: User, user_agent: str) -> Non
         secure=settings.COOKIE_SECURE,
         samesite=settings.COOKIE_SAMESITE,
     )
+
+    return response
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
@@ -312,5 +314,4 @@ async def google_auth(
         url=f"{settings.APP_HOST}/account?msg=google authentication success",
         status_code=status.HTTP_307_TEMPORARY_REDIRECT,
     )
-    _set_session_cookies(response, user, user_agent)
-    return response
+    return _set_session_cookies(response, user, user_agent)
