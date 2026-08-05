@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
+from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, select
 
 from app.core.settings import settings
@@ -209,9 +210,18 @@ def _save_message(
         chart_type=chart_type,
         is_error=is_error,
     )
-    session.add(message)
-    session.commit()
-    session.refresh(message)
+    try:
+        session.add(message)
+        session.commit()
+        session.refresh(message)
+    except OperationalError:
+        logger.warning(
+            "DB connection stale after long LLM wait; rolling back and retrying save"
+        )
+        session.rollback()
+        session.add(message)
+        session.commit()
+        session.refresh(message)
     return message
 
 
@@ -279,7 +289,7 @@ def _streamed_llm_message(client, messages, *, tools: list[dict], max_tokens: in
         messages=messages,
         tools=tools,
         stream=True,
-        timeout=60,
+        timeout=settings.LLM_TIMEOUT_SECONDS,
     )
     content_parts: list[str] = []
     tool_entries: dict[int, dict] = {}
@@ -364,6 +374,7 @@ def chat_query(
             client = OpenAI(
                 base_url=settings.LLM_BASE_URL,
                 api_key=settings.LLM_API_KEY,
+                max_retries=1,
             )
             tools: list[dict] = get_tool_llm_specs()
 

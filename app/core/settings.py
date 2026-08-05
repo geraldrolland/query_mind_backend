@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     LLM_BASE_URL: str = "https://api.deepseek.com"
     LLM_API_KEY: str = ""
     LLM_MODEL: str = "deepseek-v4-flash"
+    LLM_TIMEOUT_SECONDS: int = 180
     MAX_TOOL_ITERATIONS: int = 8
 
     SMTP_HOST: str = ""
