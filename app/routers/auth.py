@@ -316,8 +316,10 @@ async def google_auth(
     # Browsers drop cookies set on cross-site 307 redirect responses, so the
     # tokens are NOT set here. Instead, issue a short-lived opaque session code
     # that the frontend exchanges for cookies via POST /api/v1/auth/session.
+    # TTL is 10 minutes: Render free instances cold-start slowly, so the code
+    # must outlive the full redirect + frontend boot sequence.
     session_code = secrets.token_urlsafe(32)
-    redis_client.set(f"oauth_session:{session_code}", str(user.id), ex=120)
+    redis_client.set(f"oauth_session:{session_code}", str(user.id), ex=600)
 
     return RedirectResponse(
         url=(
@@ -337,17 +339,20 @@ async def exchange_session(
 ):
     """Exchange a short-lived OAuth session code for session cookies.
 
-    The code is single-use and expires after 2 minutes. Cookies are set on a
+    The code is single-use and expires after 10 minutes. Cookies are set on a
     normal same-site JSON response so browsers store them reliably.
     """
     user_id = redis_client.get(f"oauth_session:{data.token}")
     if not user_id:
+        logger.warning("OAuth session exchange failed: invalid or expired code")
         raise HTTPException(status_code=400, detail="invalid or expired session")
     redis_client.delete(f"oauth_session:{data.token}")
 
     user = session.get(User, int(user_id))
     if not user:
+        logger.warning("OAuth session exchange failed: user %s not found", user_id)
         raise HTTPException(status_code=404, detail="user not found")
 
     _set_session_cookies(response, user, request.headers.get("user-agent", ""))
+    logger.info("OAuth session exchanged for user %s", user.email)
     return {"detail": "session established"}
