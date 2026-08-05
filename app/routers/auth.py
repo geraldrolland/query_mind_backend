@@ -79,6 +79,35 @@ def _set_session_cookies(response: Response, user: User, user_agent: str) -> Res
     return response
 
 
+def _delete_session_cookies(response: Response) -> Response:
+    """Delete session cookies with the same attributes used when setting them.
+
+    Browsers ignore deletion of Secure/Partitioned cookies unless the delete
+    carries those attributes, so this must mirror `_set_session_cookies`.
+    """
+    partitioned = settings.COOKIE_PARTITIONED or settings.ENVIRONMENT == "production"
+    samesite = "none" if partitioned else settings.COOKIE_SAMESITE
+    secure = True if partitioned else settings.COOKIE_SECURE
+    response.delete_cookie(
+        key="auth_token",
+        httponly=settings.COOKIE_HTTPONLY,
+        secure=secure,
+        samesite=samesite,
+    )
+    response.delete_cookie(
+        key="csrf_token",
+        httponly=settings.COOKIE_HTTPONLY,
+        secure=secure,
+        samesite=samesite,
+    )
+    if partitioned:
+        response.raw_headers = [
+            (k, v + b"; Partitioned") if k == b"set-cookie" else (k, v)
+            for k, v in response.raw_headers
+        ]
+    return response
+
+
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register_user(
     data: UserRegistrationSchema,
@@ -186,8 +215,7 @@ async def logout_user(request: Request, response: Response):
             refresh = decode_token(payload.get("refresh_token"), "refresh_token")
             if refresh and refresh.get("jti"):
                 refresh_redis.delete(f"refresh:{refresh['jti']}")
-    response.delete_cookie("auth_token")
-    response.delete_cookie("csrf_token")
+    _delete_session_cookies(response)
     return {"detail": "logged out"}
 
 
