@@ -65,6 +65,8 @@ def _set_session_cookies(response: Response, user: User, user_agent: str) -> Res
         samesite=settings.COOKIE_SAMESITE,
     )
 
+    logger.info("Set session cookies for user %s", user.email)
+
     return response
 
 
