@@ -31,6 +31,7 @@ PUBLIC_PATHS = {
     "/api/v1/auth/google-auth",
     "/api/v1/auth/google/url",
     "/api/v1/auth/refresh-token",
+    "/api/v1/auth/session",
     "/health",
     "/docs",
     "/openapi.json",

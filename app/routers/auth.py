@@ -26,6 +26,7 @@ from app.redis_conf import refresh_redis, redis_client
 from app.schemas.auth import (
     EmailSchema,
     ResetPasswordSchema,
+    SessionExchangeSchema,
     UserLoginSchema,
     UserOut,
     UserRegistrationSchema,
@@ -312,8 +313,41 @@ async def google_auth(
         session.commit()
         session.refresh(user)
 
-    response = RedirectResponse(
-        url=f"{settings.APP_HOST}/account?msg=google authentication success",
+    # Browsers drop cookies set on cross-site 307 redirect responses, so the
+    # tokens are NOT set here. Instead, issue a short-lived opaque session code
+    # that the frontend exchanges for cookies via POST /api/v1/auth/session.
+    session_code = secrets.token_urlsafe(32)
+    redis_client.set(f"oauth_session:{session_code}", str(user.id), ex=120)
+
+    return RedirectResponse(
+        url=(
+            f"{settings.APP_HOST}/account?msg=google authentication success"
+            f"&session={session_code}"
+        ),
         status_code=status.HTTP_307_TEMPORARY_REDIRECT,
     )
-    return _set_session_cookies(response, user, user_agent)
+
+
+@router.post("/session", status_code=status.HTTP_200_OK)
+async def exchange_session(
+    data: SessionExchangeSchema,
+    request: Request,
+    response: Response,
+    session: Session = Depends(get_session),
+):
+    """Exchange a short-lived OAuth session code for session cookies.
+
+    The code is single-use and expires after 2 minutes. Cookies are set on a
+    normal same-site JSON response so browsers store them reliably.
+    """
+    user_id = redis_client.get(f"oauth_session:{data.token}")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="invalid or expired session")
+    redis_client.delete(f"oauth_session:{data.token}")
+
+    user = session.get(User, int(user_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="user not found")
+
+    _set_session_cookies(response, user, request.headers.get("user-agent", ""))
+    return {"detail": "session established"}

@@ -56,6 +56,10 @@ class VerifyEmailSchema(BaseModel):
     token: str = Field(...)
 
 
+class SessionExchangeSchema(BaseModel):
+    token: str = Field(...)
+
+
 class UserOut(BaseModel):
     id: int
     email: str
