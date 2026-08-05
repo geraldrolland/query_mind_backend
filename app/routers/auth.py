@@ -50,21 +50,29 @@ def _set_session_cookies(response: Response, user: User, user_agent: str) -> Res
         {"access_token": tokens["access"], "refresh_token": tokens["refresh"]}
     )
     csrf = sign_csrf(gen_csrf_token())
+    partitioned = settings.COOKIE_PARTITIONED or settings.ENVIRONMENT == "production"
+    samesite = "none" if partitioned else settings.COOKIE_SAMESITE
+    secure = True if partitioned else settings.COOKIE_SECURE
     response.set_cookie(
         key="auth_token",
         value=signed,
         httponly=settings.COOKIE_HTTPONLY,
-        secure=settings.COOKIE_SECURE,
-        samesite=settings.COOKIE_SAMESITE,
+        secure=secure,
+        samesite=samesite,
         max_age=settings.JWT_REFRESH_EXPIRE_DAYS * 86400,
     )
     response.set_cookie(
         key="csrf_token",
         value=csrf,
         httponly=settings.COOKIE_HTTPONLY,
-        secure=settings.COOKIE_SECURE,
-        samesite=settings.COOKIE_SAMESITE,
+        secure=secure,
+        samesite=samesite,
     )
+    if partitioned:
+        response.raw_headers = [
+            (k, v + b"; Partitioned") if k == b"set-cookie" else (k, v)
+            for k, v in response.raw_headers
+        ]
 
     logger.info("Set session cookies for user %s", user.email)
 

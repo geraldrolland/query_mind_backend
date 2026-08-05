@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     JWT_REFRESH_EXPIRE_DAYS: int = 7
     COOKIE_SECURE: bool = False
     COOKIE_SAMESITE: str = "lax"
+    COOKIE_PARTITIONED: bool = False
     COOKIE_HTTPONLY: bool = True
     CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:3001"]
 
