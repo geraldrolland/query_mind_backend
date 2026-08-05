@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     SMTP_USE_STARTTLS: bool = True
     SMTP_USE_SSL: bool = False
 
+    SENDGRID_API_KEY: str = ""
+
     MAX_UPLOAD_BYTES: int = 50 * 1024 * 1024
 
 
