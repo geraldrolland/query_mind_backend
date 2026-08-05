@@ -4,12 +4,15 @@ Streams newline-delimited JSON. Only final assistant messages are streamed; tool
 calls and tool results are executed server-side and not exposed:
     {"id", "role", "type", "chart_type", "content", "created_at"}
         assistant message (text or record content)
+    {"progress": "..."}
+        status update emitted while the tool loop runs
     {"done": true}
     {"error": "..."}
 """
 
 import json
 import logging
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from fastapi.responses import StreamingResponse
@@ -40,7 +43,7 @@ query plan with the `validate_dsl_tool` tool.
 
 Dataset ID: {DATASET_ID}
 
-Dataset schema (field -> {{type, allowed_operators}}):
+Dataset schema (field -> type):
 {SCHEMA}
 
 Rules:
@@ -48,13 +51,13 @@ Rules:
    and "dsl_definition" (the DSL query plan) with these keys:
    - "select": list of field names to return — ALWAYS a list of plain field-name
      strings, never objects; time bucketing is expressed only in "group_by"
-   - "filters": [{{"field", "operator", "value"}}] â€” operators: eq, neq, gt, gte, lt, lte,
+   - "filters": [{{"field", "operator", "value"}}] — operators: eq, neq, gt, gte, lt, lte,
      between, in, nin, contains, before, after (value is a list for between/in/nin)
-   - "sorts": [{{"field", "direction"}}] â€” asc or desc
+   - "sorts": [{{"field", "direction"}}] — asc or desc
    - "group_by": list of field names, or {{"field", "granularity"}} objects for
      date fields (granularity: day|month|quarter|year) to bucket dates
    - "metrics": [{{"metric_type": sum|count|min|max|avg, "field", "alias"}}]
-   - "limit": max rows to return (optional, 1â€“1000)
+   - "limit": max rows to return (optional, 1–1000)
    The profile returns row_count, per-column statistics, and sample rows. Use it to
    reason about the data before designing your query.
  2. Design the DSL that answers the user's question, then call validate_dsl_tool with
@@ -75,15 +78,15 @@ Rules:
     contradict the validation result based on them. The returned rows are only a slice
     (up to 20 rows): describe only rows you actually saw, and never generalize about
     the whole dataset (e.g. "all dates are in 2023") from that slice.
-4. Once your DSL is validated, answer by calling the generate_final_response tool â€” it
-   must be the ONLY tool in your response content, in its own turn, never together with
-   other tools. Its input is "content": a list of blocks, each
-   {{"type": "text", "text": "..."}} for your explanation or
-   {{"type": "record", "dsl_field": <the exact DSL validated above>, "chart_type":
-   "barchart"|"linechart"|"tablechart"|"metricchart"|"piechart"}} to show a chart.
-5. For a record block, "dsl_field" must be exactly the DSL you validated with
-   validate_dsl_tool, and "chart_type" must be one of the valid chart types (use
-   list_chart_types if unsure).
+ 4. Once your DSL is validated, answer by calling the generate_final_response tool — it
+    must be the ONLY tool in your response content, in its own turn, never together with
+    other tools. Its input is "content": a list of blocks, each
+    {{"type": "text", "text": "..."}} for your explanation or
+    {{"type": "record", "dsl_field": <the exact DSL validated above>, "chart_type":
+    "barchart"|"linechart"|"tablechart"|"metricchart"|"piechart"}} to show a chart.
+ 5. For a record block, "dsl_field" must be exactly the DSL you validated with
+    validate_dsl_tool, and "chart_type" must be one of the valid chart types (use
+    list_chart_types if unsure).
  6. Never invent values; answer from get_profile and the validation result. If a tool
     errors, report the error. Never claim row counts, null counts, or "excluded rows"
     unless a query you actually ran returned them — do not infer them from sample rows.
@@ -255,12 +258,72 @@ def _friendly_llm_error(exc: Exception) -> str:
 
 
 def _build_system_prompt(dataset: Dataset) -> str:
-    schema_json = json.dumps(dataset.dataset_schema, indent=2, default=str)
-    return SYSTEM_PROMPT_TEMPLATE.format(DATASET_ID=dataset.id, SCHEMA=schema_json)
+    schema = dataset.dataset_schema or {}
+    if isinstance(schema, dict):
+        schema_text = "\n".join(
+            f"- {field}: {rule.get('type', 'unknown')}"
+            for field, rule in schema.items()
+        )
+    else:
+        schema_text = json.dumps(schema, default=str)
+    return SYSTEM_PROMPT_TEMPLATE.format(
+        DATASET_ID=dataset.id, SCHEMA=schema_text
+    )
+
+
+def _streamed_llm_message(client, messages, *, tools: list[dict], max_tokens: int) -> SimpleNamespace:
+    """Run a streamed chat completion, accumulating the full assistant message."""
+    stream = client.chat.completions.create(
+        model=settings.LLM_MODEL,
+        max_tokens=max_tokens,
+        messages=messages,
+        tools=tools,
+        stream=True,
+        timeout=60,
+    )
+    content_parts: list[str] = []
+    tool_entries: dict[int, dict] = {}
+    for chunk in stream:
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta
+        if delta.content:
+            content_parts.append(delta.content)
+        for tc in delta.tool_calls or []:
+            entry = tool_entries.setdefault(
+                tc.index,
+                {
+                    "_idx": tc.index,
+                    "id": "",
+                    "function": {"name": "", "arguments": ""},
+                },
+            )
+            if tc.id:
+                entry["id"] = tc.id
+            if tc.function:
+                if tc.function.name:
+                    entry["function"]["name"] = tc.function.name
+                if tc.function.arguments:
+                    entry["function"]["arguments"] += tc.function.arguments
+    tool_calls = [
+        SimpleNamespace(
+            id=entry["id"],
+            type="function",
+            function=SimpleNamespace(
+                name=entry["function"]["name"],
+                arguments=entry["function"]["arguments"],
+            ),
+        )
+        for entry in sorted(tool_entries.values(), key=lambda e: e["_idx"])
+    ]
+    return SimpleNamespace(
+        content="".join(content_parts) or None,
+        tool_calls=tool_calls or None,
+    )
 
 
 @router.post("/{dataset_id}/query")
-async def chat_query(
+def chat_query(
     request: Request,
     body: ChatRequestSchema,
     dataset_id: str = Path(...),
@@ -285,7 +348,7 @@ async def chat_query(
 
     system_prompt = _build_system_prompt(dataset)
 
-    async def event_stream():
+    def event_stream():
         try:
             user_id = str(request.state.auth_user["id"])
             _save_message(
@@ -311,13 +374,14 @@ async def chat_query(
             queried = False
             tools_used = False
             for _ in range(settings.MAX_TOOL_ITERATIONS):
-                response = client.chat.completions.create(
-                    model=settings.LLM_MODEL,
-                    max_tokens=2048,
-                    messages=messages,
-                    tools=tools,
+                yield _yield_json(
+                    {
+                        "progress": (
+                            "Analyzing your data…" if not tools_used else "Running your query…"
+                        )
+                    }
                 )
-                msg = response.choices[0].message
+                msg = _streamed_llm_message(client, messages, tools=tools, max_tokens=1024)
                 tool_calls = list(msg.tool_calls or [])
 
                 final_tool = (
