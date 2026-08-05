@@ -1,8 +1,9 @@
-"""Middleware: authentication (auth_token cookie) and Redis response cache."""
+"""Middleware: request logging, authentication (auth_token cookie) and Redis response cache."""
 
 import hashlib
 import json
 import logging
+import time
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -13,6 +14,29 @@ from app.core.settings import settings
 from app.redis_conf import redis_client
 
 logger = logging.getLogger(__name__)
+
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start = time.perf_counter()
+        logger.info(
+            "REQ %s %s%s",
+            request.method,
+            request.url.path,
+            f"?{request.url.query}" if request.url.query else "",
+        )
+        response = await call_next(request)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        user_id = getattr(getattr(request, "state", None), "auth_user", {}).get("id")
+        logger.info(
+            "RES %s %s -> %s (%dms, user=%s)",
+            request.method,
+            request.url.path,
+            response.status_code,
+            round(elapsed_ms),
+            user_id,
+        )
+        return response
 
 
 def _cors_headers(request: Request) -> dict:

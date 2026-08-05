@@ -8,7 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.settings import settings
 from app.db import init_db
 from app.routers import auth, chat, datasets
-from middleware import AuthenticationMiddleware, CacheMiddleware
+from middleware import (
+    AuthenticationMiddleware,
+    CacheMiddleware,
+    RequestLoggingMiddleware,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,6 +31,7 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
+app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(auth.router)
 app.include_router(datasets.router)

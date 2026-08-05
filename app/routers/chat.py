@@ -270,6 +270,13 @@ async def chat_query(
     if not settings.LLM_API_KEY:
         raise HTTPException(status_code=503, detail="AI assistant is not configured")
 
+    logger.info(
+        "Chat request received: user=%s dataset=%s message=%r",
+        request.state.auth_user.get("id"),
+        dataset_id,
+        (body.message or "")[:120],
+    )
+
     dataset = session.exec(
         select(Dataset).where(Dataset.id == dataset_id)
     ).first()
